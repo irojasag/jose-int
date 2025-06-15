@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autocomplete Input - Developer Test</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .autocomplete-container {
+            /* ISSUE 2: Missing position: relative - developer needs to add this */
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .input-wrapper {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .input-wrapper:focus-within {
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .autocomplete-input {
+            width: 100%;
+            padding: 18px 24px;
+            border: none;
+            font-size: 16px;
+            background: transparent;
+            outline: none;
+            color: #333;
+        }
+
+        .autocomplete-input::placeholder {
+            color: #aaa;
+        }
+
+        .suggestions-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border-radius: 0 0 12px 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: none;
+        }
+
+        .suggestions-dropdown.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: all;
+        }
+
+        .suggestion-item {
+            padding: 14px 24px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-bottom: 1px solid #f0f0f0;
+            color: #333;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .suggestion-item:last-child {
+            border-bottom: none;
+        }
+
+        .suggestion-item:hover,
+        .suggestion-item.highlighted {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            transform: translateX(5px);
+        }
+
+        .suggestion-item:hover::before,
+        .suggestion-item.highlighted::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 3px;
+            background: white;
+        }
+
+        .match-highlight {
+            background: rgba(255, 255, 255, 0.3);
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .no-results {
+            padding: 20px 24px;
+            text-align: center;
+            color: #999;
+            font-style: italic;
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 18px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 20px;
+            height: 20px;
+            opacity: 0.5;
+        }
+
+        /* Custom scrollbar */
+        .suggestions-dropdown::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .suggestions-dropdown::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .suggestions-dropdown::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+
+        .suggestions-dropdown::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
+        /* Loading animation */
+        .loading {
+            padding: 20px 24px;
+            text-align: center;
+            color: #999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .error {
+            padding: 20px 24px;
+            text-align: center;
+            color: #e74c3c;
+            background: rgba(231, 76, 60, 0.1);
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Mobile responsiveness */
+        @media (max-width: 480px) {
+            .autocomplete-input {
+                padding: 16px 20px;
+                font-size: 16px;
+            }
+            
+            .suggestion-item {
+                padding: 12px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="autocomplete-container">
+        <div class="input-wrapper">
+            <input 
+                type="text" 
+                class="autocomplete-input" 
+                placeholder="Search for a country... (try typing fast!)"
+                autocomplete="off"
+                spellcheck="false"
+            >
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+            </svg>
+        </div>
+        <div class="suggestions-dropdown"></div>
+    </div>
+
+    <script>
+        class AutoComplete {
+            constructor(input, dropdown) {
+                this.input = input;
+                this.dropdown = dropdown;
+                this.currentIndex = -1;
+                this.filteredData = [];
+                this.isOpen = false;
+                this.isLoading = false;
+                
+                this.init();
+            }
+
+            init() {
+                // ISSUE 1: No debouncing/throttling - API called on every keystroke
+                this.input.addEventListener('input', this.handleInput.bind(this));
+                this.input.addEventListener('keydown', this.handleKeydown.bind(this));
+                this.input.addEventListener('blur', this.handleBlur.bind(this));
+                this.input.addEventListener('focus', this.handleFocus.bind(this));
+                
+                document.addEventListener('click', this.handleDocumentClick.bind(this));
+            }
+
+            async handleInput(e) {
+                const query = e.target.value.trim();
+                
+                if (query.length === 0) {
+                    this.hideDropdown();
+                    return;
+                }
+
+                if (query.length < 2) {
+                    return; // Don't search until at least 2 characters
+                }
+
+                // ISSUE 1: This will fire on every keystroke without any debouncing
+                // causing excessive API calls and poor performance
+                await this.searchCountries(query);
+            }
+
+            async searchCountries(query) {
+                this.isLoading = true;
+                this.showLoading();
+                
+                try {
+                    // ISSUE 3: API integration required
+                    // Developer needs to implement proper API call to:
+                    // https://countriesnow.space/api/v0.1/countries
+                    
+                    const response = await fetch('https://countriesnow.space/api/v0.1/countries');
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    // ISSUE 1: No caching - every keystroke makes a new API call
+                    // even for the same query
+                    const countries = data.data.map(country => country.country);
+                    
+                    this.filteredData = this.filterData(countries, query);
+                    this.renderSuggestions(query);
+                    this.showDropdown();
+                    this.currentIndex = -1;
+                    
+                } catch (error) {
+                    console.error('Error fetching countries:', error);
+                    this.showError();
+                } finally {
+                    this.isLoading = false;
+                }
+            }
+
+            filterData(countries, query) {
+                return countries.filter(country => 
+                    country.toLowerCase().includes(query.toLowerCase())
+                ).slice(0, 8); // Limit to 8 results
+            }
+
+            showLoading() {
+                this.dropdown.innerHTML = '<div class="loading">Searching countries...</div>';
+                this.showDropdown();
+            }
+
+            showError() {
+                this.dropdown.innerHTML = '<div class="error">Error loading countries. Please try again.</div>';
+                this.showDropdown();
+            }
+
+            renderSuggestions(query) {
+                if (this.filteredData.length === 0) {
+                    this.dropdown.innerHTML = '<div class="no-results">No countries found</div>';
+                    return;
+                }
+
+                const html = this.filteredData.map((item, index) => {
+                    const highlightedItem = this.highlightMatch(item, query);
+                    return `<div class="suggestion-item" data-index="${index}">${highlightedItem}</div>`;
+                }).join('');
+
+                this.dropdown.innerHTML = html;
+
+                // Add click listeners
+                this.dropdown.querySelectorAll('.suggestion-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        this.selectItem(item.textContent);
+                    });
+                });
+            }
+
+            highlightMatch(text, query) {
+                const regex = new RegExp(`(${query})`, 'gi');
+                return text.replace(regex, '<span class="match-highlight">$1</span>');
+            }
+
+            handleKeydown(e) {
+                if (!this.isOpen || this.isLoading) return;
+
+                switch (e.key) {
+                    case 'ArrowDown':
+                        e.preventDefault();
+                        this.currentIndex = Math.min(this.currentIndex + 1, this.filteredData.length - 1);
+                        this.updateHighlight();
+                        break;
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        this.currentIndex = Math.max(this.currentIndex - 1, -1);
+                        this.updateHighlight();
+                        break;
+                    case 'Enter':
+                        e.preventDefault();
+                        if (this.currentIndex >= 0) {
+                            this.selectItem(this.filteredData[this.currentIndex]);
+                        }
+                        break;
+                    case 'Escape':
+                        this.hideDropdown();
+                        this.input.blur();
+                        break;
+                }
+            }
+
+            updateHighlight() {
+                const items = this.dropdown.querySelectorAll('.suggestion-item');
+                items.forEach((item, index) => {
+                    item.classList.toggle('highlighted', index === this.currentIndex);
+                });
+
+                // Scroll highlighted item into view
+                if (this.currentIndex >= 0) {
+                    items[this.currentIndex].scrollIntoView({
+                        block: 'nearest',
+                        behavior: 'smooth'
+                    });
+                }
+            }
+
+            selectItem(value) {
+                this.input.value = value;
+                this.hideDropdown();
+                this.input.focus();
+                
+                // Trigger custom event
+                this.input.dispatchEvent(new CustomEvent('autocomplete:select', {
+                    detail: { value }
+                }));
+            }
+
+            handleFocus() {
+                if (this.input.value.trim() && this.filteredData.length > 0) {
+                    this.showDropdown();
+                }
+            }
+
+            handleBlur() {
+                // Delay to allow click events on suggestions
+                setTimeout(() => {
+                    this.hideDropdown();
+                }, 150);
+            }
+
+            handleDocumentClick(e) {
+                if (!this.input.contains(e.target) && !this.dropdown.contains(e.target)) {
+                    this.hideDropdown();
+                }
+            }
+
+            showDropdown() {
+                this.dropdown.classList.add('show');
+                this.isOpen = true;
+            }
+
+            hideDropdown() {
+                this.dropdown.classList.remove('show');
+                this.isOpen = false;
+                this.currentIndex = -1;
+            }
+        }
+
+        // Initialize autocomplete
+        document.addEventListener('DOMContentLoaded', () => {
+            const input = document.querySelector('.autocomplete-input');
+            const dropdown = document.querySelector('.suggestions-dropdown');
+            
+            const autocomplete = new AutoComplete(input, dropdown);
+
+            // Listen for selection events
+            input.addEventListener('autocomplete:select', (e) => {
+                console.log('Selected:', e.detail.value);
+            });
+        });
+    </script>
+</body>
+</html>
